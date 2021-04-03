@@ -21,12 +21,19 @@ class FCSSClass {
             this.styles = styles;
             FCSSClass.fcss_classes[name] = this;
             this.args = args;
+            this.name = name;
         }
     }
 
     apply_styles(element, params=null){
         if(FCSSClass.isnotnull(element)){
             for(let style_name in this.styles){
+
+                if(!(style_name in element.fstyle_affected_classes)){
+                    element.fstyle_affected_classes[style_name] = [""];
+                    element.fstyle_affected_values[style_name] = [element.style[style_name]];
+                }
+
                 if(this.styles[style_name] instanceof FCSSArg){
                     element.style[style_name] = params[this.styles[style_name].name];
                 }else if(this.styles[style_name] instanceof FCSSVariable){
@@ -34,6 +41,10 @@ class FCSSClass {
                 }else{
                     element.style[style_name] = this.styles[style_name];
                 }
+
+                element.fstyle_affected_classes[style_name].push(this.name);
+                element.fstyle_affected_values[style_name].push(element.style[style_name]);
+
             }
         }
     }
@@ -102,10 +113,35 @@ class FCSSClass {
 
 }
 
-Element.prototype.apply_class = function(name, params=null){
+Element.prototype.fclass_list = new Set();
+Element.prototype.fstyle_affected_classes = {};
+Element.prototype.fstyle_affected_values = {};
+
+Element.prototype.apply_fclass = function(name, params=null){
     let el = this;
     FCSSClass.fcss_classes[name].apply_styles(el, params);
+    el.fclass_list.add(name);
 }
+
+Element.prototype.remove_fclass = function(name){
+    let el = this;
+    el.fclass_list.delete(name);
+    for(let style in el.fstyle_affected_classes){
+        let class_list = el.fstyle_affected_classes[style];
+        let value_list = el.fstyle_affected_values[style];
+
+
+        let class_index = class_list.indexOf(name);
+        if(class_index != -1){
+            class_list.splice(class_index,1);
+            value_list.splice(class_index,1);
+
+            el.style[style] = value_list[value_list.length-1];
+        }
+
+    }
+}
+
 
 window.addEventListener("load", ()=>{
     let applied_els = document.querySelectorAll(".applied");
@@ -113,7 +149,7 @@ window.addEventListener("load", ()=>{
         let classes = FCSSClass.get_classes(el.getAttribute("data-applied"));
         for(let fcssclass of classes){
             let info = FCSSClass.get_class_info(fcssclass);
-            el.apply_class(info.name, info.params);
+            el.apply_fclass(info.name, info.params);
         }
     }
 });
