@@ -17,7 +17,7 @@ class FCSSClass {
     static fcss_classes = {};
 
     constructor(name, styles, args=null){
-        if(name.indexOf("(") == -1 && name.indexOf(")") == -1){
+        if(name.indexOf("(") == -1 && name.indexOf(")") == -1 && name.length > 0){
             this.styles = styles;
             FCSSClass.fcss_classes[name] = this;
             this.args = args;
@@ -29,9 +29,11 @@ class FCSSClass {
         if(FCSSClass.isnotnull(element)){
             for(let style_name in this.styles){
 
-                if(!(style_name in element.fstyle_affected_classes)){
-                    element.fstyle_affected_classes[style_name] = [""];
-                    element.fstyle_affected_values[style_name] = [element.style[style_name]];
+                if(!(style_name in element.fstyles_affected)){
+                    element.fstyles_affected[style_name] = {
+                        classes:[""],
+                        values:[element.style[style_name]]
+                    };
                 }
 
                 if(this.styles[style_name] instanceof FCSSArg){
@@ -42,8 +44,8 @@ class FCSSClass {
                     element.style[style_name] = this.styles[style_name];
                 }
 
-                element.fstyle_affected_classes[style_name].push(this.name);
-                element.fstyle_affected_values[style_name].push(element.style[style_name]);
+                element.fstyles_affected[style_name].classes.push(this.name);
+                element.fstyles_affected[style_name].values.push(element.style[style_name]);
 
             }
         }
@@ -114,8 +116,7 @@ class FCSSClass {
 }
 
 Element.prototype.fclass_list = new Set();
-Element.prototype.fstyle_affected_classes = {};
-Element.prototype.fstyle_affected_values = {};
+Element.prototype.fstyles_affected = {};
 
 Element.prototype.apply_fclass = function(name, params=null){
     let el = this;
@@ -126,9 +127,9 @@ Element.prototype.apply_fclass = function(name, params=null){
 Element.prototype.remove_fclass = function(name){
     let el = this;
     el.fclass_list.delete(name);
-    for(let style in el.fstyle_affected_classes){
-        let class_list = el.fstyle_affected_classes[style];
-        let value_list = el.fstyle_affected_values[style];
+    for(let style in el.fstyles_affected){
+        let class_list = el.fstyles_affected[style].classes;
+        let value_list = el.fstyles_affected[style].values;
 
 
         let class_index = class_list.indexOf(name);
