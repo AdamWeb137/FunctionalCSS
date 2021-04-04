@@ -43,7 +43,7 @@ with open(save_name, "w") as save_file:
                 state = "at_class"
 
                 if var_name != "" and var_value != "":
-                    save_file.write("FCSSClass.SetFCSSVariable('{}','{}');\n".format(var_name,var_value))
+                    save_file.write("FCSS.SetGlobal('{}','{}');\n".format(var_name,var_value))
 
 
             if c.isalnum() or c == "_" or c == "-":
@@ -64,7 +64,7 @@ with open(save_name, "w") as save_file:
             if c == "{":
                 depth += 1
                 state = "in_class"
-                save_file.write("new FCSSClass (`{}`, {{\n".format(class_name))
+                save_file.write("new FCSS (`{}`, {{\n".format(class_name))
 
             if c == "=":
                 state = "var_value"
@@ -72,7 +72,7 @@ with open(save_name, "w") as save_file:
             if c == ";":
                 if state == "var_value":
                     state = "none"
-                    save_file.write("FCSSClass.SetFCSSVariable(`{}`,`{}`);\n".format(var_name,var_value))
+                    save_file.write("FCSS.SetGlobal(`{}`,`{}`);\n".format(var_name,var_value))
 
                     var_name = ""
                     var_value = ""
