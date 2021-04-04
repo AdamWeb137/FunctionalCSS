@@ -308,9 +308,9 @@ Element.prototype.remove_fclass = function(name){
 
 
 window.addEventListener("load", ()=>{
-    let applied_els = document.querySelectorAll(".applied");
+    let applied_els = document.querySelectorAll("[fclass]");
     for(let el of applied_els){
-        let classes = FCSS.get_classes(el.getAttribute("data-applied"));
+        let classes = FCSS.get_classes(el.getAttribute("fclass"));
         for(let fcss_class of classes){
             let info = FCSS.get_class_info(fcss_class);
             el.apply_fclass(info.name, info.params);
