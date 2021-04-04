@@ -1,4 +1,7 @@
+#!/bin/sh
+
 import json
+import sys
 
 def to_camel_case(hyphenated):
     while "-" in hyphenated:

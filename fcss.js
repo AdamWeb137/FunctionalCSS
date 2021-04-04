@@ -113,6 +113,26 @@ class FCSSClass {
         return classes;
     }
 
+    static to_camel_case(hyphenated){
+        while("-" in hyphenated){
+            let i = hyphenated.indexOf("-");
+            hyphenated = hyphenated.slice(0,i) + hyphenated[i+1].toUpperCase() + hyphenated.slice(i+2);
+        }
+        return hyphenated
+    }
+
+    static type_to_value_string(var_type, value){
+        if (var_type == 0){
+            return value;
+        }
+        else if(var_type == 1){
+            return `new FCSSArg('${value}')`;
+        }
+        else if(var_type == 2){
+            return `new FCSSVariable('${value}')`;
+        }
+    }
+
 }
 
 Element.prototype.fclass_list = new Set();
