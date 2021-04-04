@@ -164,7 +164,7 @@ class FCSS {
         }
 
         let alpha_numer_str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_-";
-        let alpha_plus = alpha_numer_str+"',.()";
+        let alpha_plus = alpha_numer_str+"',.() ";
 
         let class_params = [];
         let style_type = 0;
@@ -190,7 +190,7 @@ class FCSS {
             "at_var_value":{
                 [alpha_plus]:add_c,
                 ";":function(c){
-                    write_text += `FCSS.SetGlobal('${vars_by_state["at_global"]}','${vars_by_state["at_var_value"]}');`;
+                    write_text += `FCSS.SetGlobal('${vars_by_state["at_global"]}','${vars_by_state["at_var_value"].trim()}');`;
                     clear_any_state("at_global","at_var_value");
                     state = "none";
                 }
@@ -230,7 +230,7 @@ class FCSS {
             "at_style_value":{
                 [alpha_plus]:add_c,
                 ";":function(c){
-                    write_text += ` ${FCSS.to_camel_case(vars_by_state["in_class"])}:${FCSS.type_to_value_string(style_type,vars_by_state["at_style_value"])},`;
+                    write_text += ` ${FCSS.to_camel_case(vars_by_state["in_class"])}:${FCSS.type_to_value_string(style_type,vars_by_state["at_style_value"].trim())},`;
                     clear_any_state("in_class","at_style_value");
                     style_type = 0;
                     state = "in_class";
