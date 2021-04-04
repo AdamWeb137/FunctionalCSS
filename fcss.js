@@ -114,22 +114,165 @@ class FCSSClass {
     }
 
     static to_camel_case(hyphenated){
-        while("-" in hyphenated){
+        while(hyphenated.indexOf("-") != -1){
             let i = hyphenated.indexOf("-");
             hyphenated = hyphenated.slice(0,i) + hyphenated[i+1].toUpperCase() + hyphenated.slice(i+2);
         }
-        return hyphenated
+        return hyphenated;
     }
 
     static type_to_value_string(var_type, value){
         if (var_type == 0){
-            return value;
+            return `'${value}'`;
         }
         else if(var_type == 1){
             return `new FCSSArg('${value}')`;
         }
         else if(var_type == 2){
             return `new FCSSVariable('${value}')`;
+        }
+    }
+
+    static load(text){
+        let script = document.createElement("script");
+        let write_text = "";
+
+        let depth = 0;
+        let state = "none";
+
+        let vars_by_state = {
+            "at_global":"",
+            "at_class":"",
+            "in_class":"",
+            "at_params":"",
+            "at_style_value":"",
+            "at_var_value":""
+        };
+
+        let add_c = function(c){
+            vars_by_state[state] += c;
+        }
+
+        let clear_any_state = function(){
+            for(let arg of arguments){
+                vars_by_state[arg] = "";
+            }
+        }
+
+        let clear_state = function(){
+            clear_any_state(state);
+        }
+
+        let alpha_numer_str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_-";
+        let alpha_plus = alpha_numer_str+"',.()";
+
+        let class_params = [];
+        let style_type = 0;
+
+        let action_by_state = {
+            "none":{
+                [alpha_numer_str]:function(c){
+                    state = "at_global";
+                    add_c(c);
+                },
+                ".":(c)=>{state = "at_class";},
+                "{":function(c){
+                    if(vars_by_state["at_class"] != ""){
+                        write_text += `new FCSSClass('${vars_by_state["at_class"]}', {`;
+                        state = "in_class";
+                    }
+                }
+            },
+            "at_global":{
+                [alpha_numer_str]:add_c,
+                "=":(c)=>{state = "at_var_value";},
+            },
+            "at_var_value":{
+                [alpha_plus]:add_c,
+                ";":function(c){
+                    write_text += `FCSSClass.SetFCSSVariable('${vars_by_state["at_global"]}','${vars_by_state["at_var_value"]}');`;
+                    clear_any_state("at_global","at_var_value");
+                    state = "none";
+                }
+            },
+            "at_class":{
+                [alpha_numer_str]:add_c,
+                "(":(c)=>{state = "at_params";},
+                "{":function(c){
+                    if(vars_by_state["at_class"] != ""){
+                        write_text += `new FCSSClass('${vars_by_state["at_class"]}', {`;
+                        state = "in_class";
+                    }
+                }
+            },
+            "at_params":{
+                [alpha_numer_str]:add_c,
+                ",":function(c){
+                    class_params.push(vars_by_state[state]);
+                    clear_state();
+                },
+                ")":function(c){
+                    class_params.push(vars_by_state[state]);
+                    clear_state();
+                    state = "none";
+                },
+            },
+            "in_class":{
+                [alpha_numer_str]:add_c,
+                ":":(c)=>{state = "at_style_value";},
+                "}":function(c){
+                    write_text += `}${(class_params.length > 0) ? ", " + JSON.stringify(class_params) : ""});`;
+                    clear_any_state("at_class","at_params");
+                    class_params = [];
+                    state = "none";
+                },
+            },
+            "at_style_value":{
+                [alpha_plus]:add_c,
+                ";":function(c){
+                    write_text += ` ${FCSSClass.to_camel_case(vars_by_state["in_class"])}:${FCSSClass.type_to_value_string(style_type,vars_by_state["at_style_value"])},`;
+                    clear_any_state("in_class","at_style_value");
+                    style_type = 0;
+                    state = "in_class";
+                },
+                "$":(c)=>{style_type++;}
+            }
+        };
+        
+
+        for(let i = 0; i < text.length; i++){
+            let c = text[i];
+            let keys = Object.keys(action_by_state[state]);
+            for(let key of keys){
+                if(key == c || key.indexOf(c) > -1){
+                    action_by_state[state][key](c);
+                }
+            }
+        }
+
+        document.querySelector("head").appendChild(script);
+        script.innerHTML = write_text;
+
+    }
+
+    static load_from_url(url){
+
+        /*not tested*/
+
+        let request = new XMLHttpRequest();
+
+        let url_split = window.location.href.split('/');
+        let new_url = url_split.slice(0,url_split.length-1).join('/')+url;
+
+        request.open('GET', new_url, true);
+        request.send(null);
+        request.onreadystatechange = function () {
+            if (request.readyState === 4 && request.status === 200) {
+                var type = request.getResponseHeader('Content-Type');
+                if (type.indexOf("text") !== 1) {
+                    FCSSClass.load(request.responseText);
+                }
+            }
         }
     }
 
