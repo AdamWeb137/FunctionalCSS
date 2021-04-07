@@ -11,15 +11,38 @@ class FCSSVariable {
     }
 }
 
+class FCSSElement {
+    constructor(selector){
+        this.selector = selector;
+    }
+}
+
+// class FCSSShorthand {
+//     constructor (name, args, styles){
+
+//     }
+// }
+
 class FCSS {
 
     static global_variables = {};
     static classes = {};
 
+    static elements_by_class = {};
+
+    static GetFirstElement(class_name){
+        return FCSS.elements_by_class[class_name][0];
+    }
+
+    static GetAllElements(class_name){
+        return FCSS.elements_by_class[class_name];
+    }
+
     constructor(name, styles, args=null){
         if(name.indexOf("(") == -1 && name.indexOf(")") == -1 && name.length > 0){
             this.styles = styles;
             FCSS.classes[name] = this;
+            FCSS.elements_by_class[name] = [];
             this.args = args;
             this.name = name;
         }
@@ -40,6 +63,10 @@ class FCSS {
                     element.style[style_name] = params[this.styles[style_name].name];
                 }else if(this.styles[style_name] instanceof FCSSVariable){
                     element.style[style_name] = FCSS.global_variables[this.styles[style_name].name];
+                }else if(this.styles[style_name] instanceof FCSSElement){
+                    let selected_el = FCSS.GetSelected(element, this.styles[style_name].selector);
+                    let selector_style_name = FCSS.GetStyleNameFromSelector(style_name, this.styles[style_name].selector);
+                    element.style[style_name] = selected_el.style[selector_style_name];
                 }else{
                     element.style[style_name] = this.styles[style_name];
                 }
@@ -48,6 +75,30 @@ class FCSS {
                 element.fstyles_affected[style_name].values.push(element.style[style_name]);
 
             }
+        }
+    }
+
+    static GetSelected(element, selector){
+        selector = (selector[0] == "@") ? selector.slice(1) : selector;
+        selector = (selector.indexOf("[") > -1) ? selector.slice(0,selector.indexOf("[")) : selector;
+        if(selector == "parent"){
+            return element.parentElement;
+        }else if(selector == "child"){
+            return element.children[0];
+        }else if(selector == "self"){
+            return element;   
+        }else{
+            return document.querySelector(selector);
+        }
+    }
+
+    static GetStyleNameFromSelector(style_name,selector){
+        let split = selector.split("[");
+        if(split.length > 1){
+            let name = FCSS.to_camel_case(split[1].replace("]",""));
+            return name;
+        }else{
+            return style_name;
         }
     }
 
@@ -122,15 +173,25 @@ class FCSS {
     }
 
     static type_to_value_string(var_type, value){
-        if (var_type == 0){
-            return `'${value}'`;
+
+        if(value.length > 0){
+
+            if(value[0] == "@"){
+                return `new FCSSElement('${value}')`;
+            }
+
+            if (var_type == 0){
+                return `'${value}'`;
+            }
+            else if(var_type == 1){
+                return `new FCSSArg('${value}')`;
+            }
+            else if(var_type == 2){
+                return `new FCSSVariable('${value}')`;
+            }
+
         }
-        else if(var_type == 1){
-            return `new FCSSArg('${value}')`;
-        }
-        else if(var_type == 2){
-            return `new FCSSVariable('${value}')`;
-        }
+
     }
 
     static load(text){
@@ -164,12 +225,22 @@ class FCSS {
         }
 
         let alpha_numer_str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_-";
-        let alpha_plus = alpha_numer_str+"',.() ";
+        let alpha_plus = alpha_numer_str+"',.()@[]%*+-/#^! ";
 
         let class_params = [];
         let style_type = 0;
 
+        let comment_slashes = 0;
+
         let action_by_state = {
+            "*":{
+                "/":function(c){
+                    comment_slashes++;
+                },
+                "\n":function(c){
+                    comment_slashes=0;
+                }
+            },
             "none":{
                 [alpha_numer_str]:function(c){
                     state = "at_global";
@@ -229,7 +300,7 @@ class FCSS {
             },
             "at_style_value":{
                 [alpha_plus]:add_c,
-                ";":function(c){
+                ";":function(c){ 
                     write_text += ` ${FCSS.to_camel_case(vars_by_state["in_class"])}:${FCSS.type_to_value_string(style_type,vars_by_state["at_style_value"].trim())},`;
                     clear_any_state("in_class","at_style_value");
                     style_type = 0;
@@ -243,8 +314,15 @@ class FCSS {
         for(let i = 0; i < text.length; i++){
             let c = text[i];
             let keys = Object.keys(action_by_state[state]);
+
+            for(let k of Object.keys(action_by_state["*"])){
+                if(k == c){
+                    action_by_state["*"][k](c);
+                }
+            }
+
             for(let key of keys){
-                if(key == c || key.indexOf(c) > -1){
+                if((key == c || key.indexOf(c) > -1) && comment_slashes < 2){
                     action_by_state[state][key](c);
                 }
             }
@@ -285,11 +363,20 @@ Element.prototype.apply_fclass = function(name, params=null){
     let el = this;
     FCSS.classes[name].apply_styles(el, params);
     el.fclass_list.add(name);
+    el.classList.add(name);
+    FCSS.elements_by_class[name].push(el);
 }
 
 Element.prototype.remove_fclass = function(name){
     let el = this;
     el.fclass_list.delete(name);
+    el.classList.delete(name);
+
+    let i = FCSS.elements_by_class[name].indexOf(el);
+    if(i > -1){
+        FCSS.elements_by_class[name].splice(i, 1);
+    }
+
     for(let style in el.fstyles_affected){
         let class_list = el.fstyles_affected[style].classes;
         let value_list = el.fstyles_affected[style].values;
