@@ -46,6 +46,17 @@ class FCSSShorthand {
         return write_text;
     }
 
+    get_style_value_pairs(args){
+        let pairs = [];
+        let styles_dict = this.get_styles_dict(args);
+        for(let i = 0; i < this.styles.length; i++){
+            let key = this.styles[i][0];
+            let value_name = this.styles[i][1];
+            pairs.push([key, styles_dict[value_name].trim()]);
+        }
+        return pairs;
+    }
+
 }
 
 class FCSS {
@@ -247,7 +258,15 @@ class FCSS {
             "in_short":"",
             "at_short_style":"",
             "class_short":"",
-            "class_short_params":""
+            "class_short_params":"",
+            "meta_short":"",
+            "meta_short_params":""
+        };
+
+        let depth_dict = {
+            "(":0,
+            "{":0,
+            "[":0
         };
 
         let add_c = function(c){
@@ -274,8 +293,10 @@ class FCSS {
         let short_styles_values = [];
 
         let class_short_params = [];
+        let meta_short_params = [];
 
         let comment_slashes = 0;
+        let can_run = true;
 
         let action_by_state = {
             "*":{
@@ -287,10 +308,6 @@ class FCSS {
                 }
             },
             "none":{
-                [alpha_numer_str]:function(c){
-                    state = "at_global";
-                    add_c(c);
-                },
                 ".":(c)=>{state = "at_class";},
                 "{":function(c){
                     if(vars_by_state["at_class"] != ""){
@@ -300,14 +317,17 @@ class FCSS {
                         state = "in_short";
                     }
                 },
-                "&":(c)=>{state = "at_short";}
+                "&":(c)=>{state = "at_short";},
+                [alpha_numer_str]:function(c){
+                    state = "at_global";
+                    add_c(c);
+                },
             },
             "at_short":{
+                "(":(c)=>{state = "at_short_params";},
                 [alpha_numer_str]:add_c,
-                "(":(c)=>{state = "at_short_params";}
             },
             "at_short_params":{
-                [alpha_numer_str]:add_c,
                 ",":function(c){
                     short_params.push(vars_by_state[state]);
                     clear_state();
@@ -316,10 +336,10 @@ class FCSS {
                     short_params.push(vars_by_state[state]);
                     clear_state();
                     state = "none";
-                }
+                },
+                [alpha_numer_str]:add_c,
             },
             "in_short":{
-                [alpha_numer_str]:add_c,
                 ":":(c)=>{state = "at_short_style";},
                 "}":function(c){
                     new FCSSShorthand(vars_by_state["at_short"], short_params, short_styles_values);
@@ -329,6 +349,29 @@ class FCSS {
                     short_styles_values = [];
 
                     state = "none";
+                },
+                "&":(c)=>{state = "meta_short";},
+                [alpha_numer_str]:add_c,
+            },
+            "meta_short":{
+                [alpha_numer_str]:add_c,
+                ":":(c)=>{state = "meta_short_params";}
+            },
+            "meta_short_params":{
+                [alpha_numer_str]:add_c,
+                ",":function(c){
+                    meta_short_params.push(vars_by_state[state]);
+                    clear_state();
+                },
+                ";":function(c){
+                    meta_short_params.push(vars_by_state[state]);
+                    clear_state();
+                    short_styles_values = short_styles_values.concat(FCSS.shorthands[vars_by_state["meta_short"]].get_style_value_pairs(meta_short_params));
+                    state = "in_short";
+
+                    clear_any_state("meta_short","meta_short_params");
+                    meta_short_params = [];
+
                 }
             },
             "at_short_style":{
@@ -386,34 +429,35 @@ class FCSS {
             },
             "class_short":{
                 [alpha_numer_str]:add_c,
-                "(":(c)=>{state = "class_short_params";}
+                ":":(c)=>{state = "class_short_params";}
             },
             "class_short_params":{
-                [alpha_numer_str]:add_c,
                 ",":function(c){
                     class_short_params.push(vars_by_state[state]);
                     clear_state();
-                },
-                ")":function(c){
-                    class_short_params.push(vars_by_state[state]);
-                    clear_state();
+                    can_run = false;
                 },
                 ";":function(c){
+                    class_short_params.push(vars_by_state[state]);
+                    clear_state();
+                    console.log(vars_by_state["class_short"]);
                     write_text += FCSS.shorthands[vars_by_state["class_short"]].render_js(class_short_params);
                     class_short_params = [];
                     clear_any_state("class_short","class_short_params");
                     state = "in_class";
-                }
+                },
+                [alpha_plus]:add_c,
+                "$":add_c,
             },
             "at_style_value":{
-                [alpha_plus]:add_c,
                 ";":function(c){ 
                     write_text += ` ${FCSS.to_camel_case(vars_by_state["in_class"])}:${FCSS.type_to_value_string(vars_by_state["at_style_value"].trim())},`;
                     clear_any_state("in_class","at_style_value");
                     style_type = 0;
                     state = "in_class";
                 },
-                "$":add_c
+                "$":add_c,
+                [alpha_plus]:add_c,
             }
         };
         
@@ -422,6 +466,8 @@ class FCSS {
             let c = text[i];
             let keys = Object.keys(action_by_state[state]);
 
+            can_run = true;
+
             for(let k of Object.keys(action_by_state["*"])){
                 if(k == c){
                     action_by_state["*"][k](c);
@@ -429,7 +475,7 @@ class FCSS {
             }
 
             for(let key of keys){
-                if((key == c || key.indexOf(c) > -1) && comment_slashes < 2){
+                if((key == c || key.indexOf(c) > -1) && comment_slashes < 2 && can_run){
                     action_by_state[state][key](c);
                 }
             }
@@ -463,38 +509,63 @@ class FCSS {
 
 }
 
-Element.prototype.fclass_list = new Set();
-Element.prototype.fstyles_affected = {};
-
 Element.prototype.apply_fclass = function(name, params=null){
+
     let el = this;
-    FCSS.classes[name].apply_styles(el, params);
+
+    if(!el.hasOwnProperty("fclass_list")){
+        el.fclass_list = new Set();
+    }
+
+    if(!el.hasOwnProperty("fstyles_affected")){
+        el.fstyles_affected = {};
+    }
+
+    if(name in FCSS.classes){
+        FCSS.classes[name].apply_styles(el, params);
+        FCSS.elements_by_class[name].push(el);
+    }else{
+        FCSS.elements_by_class[name] = [el];
+    }
+
     el.fclass_list.add(name);
     el.classList.add(name);
-    FCSS.elements_by_class[name].push(el);
 }
 
 Element.prototype.remove_fclass = function(name){
     let el = this;
-    el.fclass_list.delete(name);
-    el.classList.delete(name);
 
-    let i = FCSS.elements_by_class[name].indexOf(el);
-    if(i > -1){
-        FCSS.elements_by_class[name].splice(i, 1);
+    if(!el.hasOwnProperty("fclass_list")){
+        el.fclass_list = new Set();
     }
 
-    for(let style in el.fstyles_affected){
-        let class_list = el.fstyles_affected[style].classes;
-        let value_list = el.fstyles_affected[style].values;
+    if(!el.hasOwnProperty("fstyles_affected")){
+        el.fstyles_affected = {};
+    }
+
+    el.fclass_list.delete(name);
+    el.classList.remove(name);
+
+    if(name in FCSS.classes){    
+
+        let i = FCSS.elements_by_class[name].indexOf(el);
+        if(i > -1){
+            FCSS.elements_by_class[name].splice(i, 1);
+        }
+
+        for(let style in el.fstyles_affected){
+            let class_list = el.fstyles_affected[style].classes;
+            let value_list = el.fstyles_affected[style].values;
 
 
-        let class_index = class_list.indexOf(name);
-        if(class_index != -1){
-            class_list.splice(class_index,1);
-            value_list.splice(class_index,1);
+            let class_index = class_list.indexOf(name);
+            if(class_index != -1){
+                class_list.splice(class_index,1);
+                value_list.splice(class_index,1);
 
-            el.style[style] = value_list[value_list.length-1];
+                el.style[style] = value_list[value_list.length-1];
+            }
+
         }
 
     }
@@ -502,7 +573,6 @@ Element.prototype.remove_fclass = function(name){
 
 
 window.addEventListener("load", ()=>{
-    console.log(FCSS.classes);
     let applied_els = document.querySelectorAll("[fclass]");
     for(let el of applied_els){
         let classes = FCSS.get_classes(el.getAttribute("fclass"));
