@@ -38,6 +38,7 @@ In fcss we can do it like this:
 To actually use this on an html page put this in the head after downloading fcss.js:
 ```html
   <script src="fcss.js"></script>
+  <script src="default_fcss.js"></script>
   <script>
     FCSS.load(`
       how_round = 25px;
