@@ -17,16 +17,42 @@ class FCSSElement {
     }
 }
 
-// class FCSSShorthand {
-//     constructor (name, args, styles){
+class FCSSShorthand {
+    constructor (name, args, styles){
+        this.name = name;
+        this.arg_names = args;
+        this.styles = styles;
 
-//     }
-// }
+        FCSS.shorthands[name] = this;
+
+    }
+
+    get_styles_dict(args){
+        let dict = {};
+        for(let i = 0; i < args.length; i++){
+            dict[this.arg_names[i]] = args[i];
+        }
+        return dict;
+    }
+
+    render_js(args){
+        let write_text = "";
+        let styles_dict = this.get_styles_dict(args);
+        for(let i = 0; i < this.styles.length; i++){
+            let key = this.styles[i][0];
+            let value_name = this.styles[i][1];
+            write_text += `${FCSS.to_camel_case(key)}:${FCSS.type_to_value_string(styles_dict[value_name].trim())},`;
+        }
+        return write_text;
+    }
+
+}
 
 class FCSS {
 
     static global_variables = {};
     static classes = {};
+    static shorthands = {};
 
     static elements_by_class = {};
 
@@ -172,13 +198,21 @@ class FCSS {
         return hyphenated;
     }
 
-    static type_to_value_string(var_type, value){
+    static type_to_value_string(value){
 
         if(value.length > 0){
 
             if(value[0] == "@"){
                 return `new FCSSElement('${value}')`;
             }
+
+
+            let var_type = 0;
+            while(value[0] == "$"){
+                var_type++;
+                value = value.slice(1);
+            }
+
 
             if (var_type == 0){
                 return `'${value}'`;
@@ -207,7 +241,13 @@ class FCSS {
             "in_class":"",
             "at_params":"",
             "at_style_value":"",
-            "at_var_value":""
+            "at_var_value":"",
+            "at_short":"",
+            "at_short_params":"",
+            "in_short":"",
+            "at_short_style":"",
+            "class_short":"",
+            "class_short_params":""
         };
 
         let add_c = function(c){
@@ -225,10 +265,15 @@ class FCSS {
         }
 
         let alpha_numer_str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_-";
-        let alpha_plus = alpha_numer_str+"',.()@[]%*+-/#^! ";
+        let alpha_plus = alpha_numer_str+"',.()@[]%*+-/#^!& ";
 
         let class_params = [];
         let style_type = 0;
+
+        let short_params = [];
+        let short_styles_values = [];
+
+        let class_short_params = [];
 
         let comment_slashes = 0;
 
@@ -251,7 +296,47 @@ class FCSS {
                     if(vars_by_state["at_class"] != ""){
                         write_text += `new FCSS('${vars_by_state["at_class"]}', {`;
                         state = "in_class";
+                    }else if(vars_by_state["at_short"] != ""){
+                        state = "in_short";
                     }
+                },
+                "&":(c)=>{state = "at_short";}
+            },
+            "at_short":{
+                [alpha_numer_str]:add_c,
+                "(":(c)=>{state = "at_short_params";}
+            },
+            "at_short_params":{
+                [alpha_numer_str]:add_c,
+                ",":function(c){
+                    short_params.push(vars_by_state[state]);
+                    clear_state();
+                },
+                ")":function(c){
+                    short_params.push(vars_by_state[state]);
+                    clear_state();
+                    state = "none";
+                }
+            },
+            "in_short":{
+                [alpha_numer_str]:add_c,
+                ":":(c)=>{state = "at_short_style";},
+                "}":function(c){
+                    new FCSSShorthand(vars_by_state["at_short"], short_params, short_styles_values);
+                    clear_any_state("at_short","at_short_params");
+
+                    short_params = [];
+                    short_styles_values = [];
+
+                    state = "none";
+                }
+            },
+            "at_short_style":{
+                [alpha_numer_str]:add_c,
+                ";":function(c){
+                    short_styles_values.push([vars_by_state["in_short"],vars_by_state["at_short_style"]]);
+                    clear_any_state("in_short","at_short_style");
+                    state = "in_short";
                 }
             },
             "at_global":{
@@ -297,16 +382,38 @@ class FCSS {
                     class_params = [];
                     state = "none";
                 },
+                "&":(c)=>{state = "class_short";}
+            },
+            "class_short":{
+                [alpha_numer_str]:add_c,
+                "(":(c)=>{state = "class_short_params";}
+            },
+            "class_short_params":{
+                [alpha_numer_str]:add_c,
+                ",":function(c){
+                    class_short_params.push(vars_by_state[state]);
+                    clear_state();
+                },
+                ")":function(c){
+                    class_short_params.push(vars_by_state[state]);
+                    clear_state();
+                },
+                ";":function(c){
+                    write_text += FCSS.shorthands[vars_by_state["class_short"]].render_js(class_short_params);
+                    class_short_params = [];
+                    clear_any_state("class_short","class_short_params");
+                    state = "in_class";
+                }
             },
             "at_style_value":{
                 [alpha_plus]:add_c,
                 ";":function(c){ 
-                    write_text += ` ${FCSS.to_camel_case(vars_by_state["in_class"])}:${FCSS.type_to_value_string(style_type,vars_by_state["at_style_value"].trim())},`;
+                    write_text += ` ${FCSS.to_camel_case(vars_by_state["in_class"])}:${FCSS.type_to_value_string(vars_by_state["at_style_value"].trim())},`;
                     clear_any_state("in_class","at_style_value");
                     style_type = 0;
                     state = "in_class";
                 },
-                "$":(c)=>{style_type++;}
+                "$":add_c
             }
         };
         
@@ -395,6 +502,7 @@ Element.prototype.remove_fclass = function(name){
 
 
 window.addEventListener("load", ()=>{
+    console.log(FCSS.classes);
     let applied_els = document.querySelectorAll("[fclass]");
     for(let el of applied_els){
         let classes = FCSS.get_classes(el.getAttribute("fclass"));
