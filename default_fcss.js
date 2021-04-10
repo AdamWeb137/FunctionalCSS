@@ -58,4 +58,9 @@ FCSS.load(`
         transition-timing-function:function;
     }
 
-`);
+    &size(w,h){
+        width:w;
+        height:h;
+    }
+
+`, true);

@@ -28,22 +28,16 @@ class FCSSShorthand {
     }
 
     get_styles_dict(args){
+
+        if(args.length != this.arg_names.length){
+            throw new Error(`Shorthand, ${this.name}, requires ${this.arg_names.length} despite ${args.length} given`);
+        }
+
         let dict = {};
         for(let i = 0; i < args.length; i++){
-            dict[this.arg_names[i]] = args[i];
+            dict[this.arg_names[i]] = args[i].trim();
         }
         return dict;
-    }
-
-    render_js(args){
-        let write_text = "";
-        let styles_dict = this.get_styles_dict(args);
-        for(let i = 0; i < this.styles.length; i++){
-            let key = this.styles[i][0];
-            let value_name = this.styles[i][1];
-            write_text += `${FCSS.to_camel_case(key)}:${FCSS.type_to_value_string(styles_dict[value_name].trim())},`;
-        }
-        return write_text;
     }
 
     get_style_value_pairs(args){
@@ -55,6 +49,16 @@ class FCSSShorthand {
             pairs.push([key, styles_dict[value_name].trim()]);
         }
         return pairs;
+    }
+
+    get_classed_style_dict(dict, args, local_args=true){
+        let styles_dict = this.get_styles_dict(args);
+        for(let i = 0; i < this.styles.length; i++){
+            let key = this.styles[i][0];
+            let value_name = this.styles[i][1];
+            dict[FCSS.to_camel_case(key)] = FCSS.type_to_value(styles_dict[value_name].trim(), local_args);
+        }
+        return dict;
     }
 
 }
@@ -151,26 +155,70 @@ class FCSS {
         FCSS.global_variables[name] = value;
     }
 
+    static split_comma_depth(s){
+        let depth = 0;
+        let args = [];
+        let last_i = -1;
+        for(let i = 0; i < s.length; i++){
+            if((s[i] == "," || s[i] == ")") && depth == 0){
+                args.push(s.slice(last_i+1,i))
+                last_i = i;
+            }
+
+            if(s[i] == "("){
+                depth++;
+            }
+
+            if(s[i] == ")"){
+                depth = Math.max(depth-1,0);
+            }
+
+        }
+
+        return args;
+
+    }
+
     static get_class_info(class_string){
-        let split = class_string.split("(");
-        let class_name = split[0];
+        let split = class_string.split_left_right("(");
+        let class_name = split.left;
     
+        if(!(class_name in FCSS.classes)){
+            throw new Error(`Class, ${class_name}, does not exist`);
+        }
+
         if(class_string.indexOf("(") == -1){
+
+            if(FCSS.classes[class_name].args != null){
+                let p_needed = FCSS.classes[class_name].args.length;
+                throw new Error(`Class, ${class_name}, requires ${p_needed} paramter${(p_needed == 1) ? "" : "s"}`);
+            }
+
             return {name:class_name, params:null};
         }
     
-        let value_list = split[1].replace(")", "").split(",");
+        let value_list = split.right;
+        value_list = FCSS.split_comma_depth(value_list);
+
         let args_dict = {};
     
         /*remove whitespace at beggining and end and then add value of arg to arg dict*/
+
+        if(FCSS.classes[class_name].args.length != value_list.length){
+            let p_needed = FCSS.classes[class_name].args.length;
+            throw new Error(`Class, ${class_name}, requires ${p_needed} paramter${(p_needed == 1) ? "" : "s"} not ${value_list.length}`);
+        }
+
         for(let i = 0 ; i < value_list.length; i++){
-            value_list[i] = value_list[i].replace(/^\s+|\s+$|\s+(?=\s)/g, "");
+            value_list[i] = value_list[i].trim();
     
             let arg_name = FCSS.classes[class_name].args[i];
             args_dict[arg_name] = value_list[i];
         }
     
-        return {name:class_name, params:args_dict};
+        let info = {name:class_name, params:args_dict};
+
+        return info;
     
     }
 
@@ -209,39 +257,33 @@ class FCSS {
         return hyphenated;
     }
 
-    static type_to_value_string(value){
-
+    static type_to_value(value, local_args=true){
         if(value.length > 0){
-
             if(value[0] == "@"){
-                return `new FCSSElement('${value}')`;
+                return new FCSSElement(value);
             }
-
-
             let var_type = 0;
             while(value[0] == "$"){
                 var_type++;
                 value = value.slice(1);
             }
-
-
             if (var_type == 0){
-                return `'${value}'`;
+                return value;
             }
             else if(var_type == 1){
-                return `new FCSSArg('${value}')`;
+                if(local_args){
+                    return new FCSSArg(value);
+                }else{
+                    return new FCSSVariable(value);
+                }
             }
             else if(var_type == 2){
-                return `new FCSSVariable('${value}')`;
+                return new FCSSVariable(value);
             }
-
         }
-
     }
 
-    static load(text){
-        let script = document.createElement("script");
-        let write_text = "";
+    static load(text, short_to_class=false){
 
         let depth = 0;
         let state = "none";
@@ -263,12 +305,6 @@ class FCSS {
             "meta_short_params":""
         };
 
-        let depth_dict = {
-            "(":0,
-            "{":0,
-            "[":0
-        };
-
         let add_c = function(c){
             vars_by_state[state] += c;
         }
@@ -287,13 +323,14 @@ class FCSS {
         let alpha_plus = alpha_numer_str+"',.()@[]%*+-/#^!& ";
 
         let class_params = [];
-        let style_type = 0;
 
         let short_params = [];
         let short_styles_values = [];
 
         let class_short_params = [];
         let meta_short_params = [];
+
+        let class_dict = {};
 
         let comment_slashes = 0;
         let can_run = true;
@@ -308,10 +345,14 @@ class FCSS {
                 }
             },
             "none":{
-                ".":(c)=>{state = "at_class";},
+                ".":(c)=>{
+                    if(depth == 0){
+                        state = "at_class";
+                    }
+                },
                 "{":function(c){
+                    depth = 0;
                     if(vars_by_state["at_class"] != ""){
-                        write_text += `new FCSS('${vars_by_state["at_class"]}', {`;
                         state = "in_class";
                     }else if(vars_by_state["at_short"] != ""){
                         state = "in_short";
@@ -343,19 +384,32 @@ class FCSS {
                 ":":(c)=>{state = "at_short_style";},
                 "}":function(c){
                     new FCSSShorthand(vars_by_state["at_short"], short_params, short_styles_values);
+
+                    if(short_to_class){
+                        FCSS.short_to_class(vars_by_state["at_short"], short_styles_values, short_params);
+                    }
+
                     clear_any_state("at_short","at_short_params");
 
                     short_params = [];
                     short_styles_values = [];
 
                     state = "none";
+                    depth = 0;
                 },
                 "&":(c)=>{state = "meta_short";},
                 [alpha_numer_str]:add_c,
             },
             "meta_short":{
                 [alpha_numer_str]:add_c,
-                ":":(c)=>{state = "meta_short_params";}
+                ":":(c)=>{
+
+                    if(!(vars_by_state[state] in FCSS.shorthands)){
+                        throw new Error(`Shorthand, ${vars_by_state[vars_by_state]}, does not exist`);
+                    }
+
+                    state = "meta_short_params";
+                }
             },
             "meta_short_params":{
                 [alpha_numer_str]:add_c,
@@ -364,6 +418,7 @@ class FCSS {
                     clear_state();
                 },
                 ";":function(c){
+
                     meta_short_params.push(vars_by_state[state]);
                     clear_state();
                     short_styles_values = short_styles_values.concat(FCSS.shorthands[vars_by_state["meta_short"]].get_style_value_pairs(meta_short_params));
@@ -389,17 +444,22 @@ class FCSS {
             "at_var_value":{
                 [alpha_plus]:add_c,
                 ";":function(c){
-                    write_text += `FCSS.SetGlobal('${vars_by_state["at_global"]}','${vars_by_state["at_var_value"].trim()}');`;
-                    clear_any_state("at_global","at_var_value");
-                    state = "none";
-                }
+                    if(depth == 0){
+                        FCSS.SetGlobal(vars_by_state["at_global"],vars_by_state["at_var_value"].trim());
+                        clear_any_state("at_global","at_var_value");
+                        state = "none";
+                    }else{
+                        add_c(c);
+                    }
+                },
+                "(":(c)=>{depth++;},
+                ")":(c)=>{depth--;},
             },
             "at_class":{
                 [alpha_numer_str]:add_c,
                 "(":(c)=>{state = "at_params";},
                 "{":function(c){
                     if(vars_by_state["at_class"] != ""){
-                        write_text += `new FCSS('${vars_by_state["at_class"]}', {`;
                         state = "in_class";
                     }
                 }
@@ -420,10 +480,23 @@ class FCSS {
                 [alpha_numer_str]:add_c,
                 ":":(c)=>{state = "at_style_value";},
                 "}":function(c){
-                    write_text += `}${(class_params.length > 0) ? ", " + JSON.stringify(class_params) : ""});`;
+
+                    if(vars_by_state["in_class"].length > 0 && vars_by_state["at_style_value"].length > 0){
+                        class_dict[FCSS.to_camel_case(vars_by_state["in_class"])] = FCSS.type_to_value(vars_by_state["at_style_value"].trim());
+                        clear_any_state("in_class","at_style_value");
+                    }
+
+                    if(class_params.length > 0){
+                        new FCSS(vars_by_state["at_class"], class_dict, class_params);
+                    }else{
+                        new FCSS(vars_by_state["at_class"], class_dict);
+                    }
+
                     clear_any_state("at_class","at_params");
                     class_params = [];
+                    class_dict = {};
                     state = "none";
+                    depth = 0;
                 },
                 "&":(c)=>{state = "class_short";}
             },
@@ -433,29 +506,41 @@ class FCSS {
             },
             "class_short_params":{
                 ",":function(c){
-                    class_short_params.push(vars_by_state[state]);
-                    clear_state();
-                    can_run = false;
+                    if(depth == 0){
+                        class_short_params.push(vars_by_state[state]);
+                        clear_state();
+                        can_run = false;
+                    }
                 },
                 ";":function(c){
-                    class_short_params.push(vars_by_state[state]);
-                    clear_state();
-                    console.log(vars_by_state["class_short"]);
-                    write_text += FCSS.shorthands[vars_by_state["class_short"]].render_js(class_short_params);
-                    class_short_params = [];
-                    clear_any_state("class_short","class_short_params");
-                    state = "in_class";
+                    if(depth == 0){
+                        class_short_params.push(vars_by_state[state]);
+                        clear_state();
+                        class_dict = FCSS.shorthands[vars_by_state["class_short"]].get_classed_style_dict(class_dict, class_short_params);
+                        class_short_params = [];
+                        clear_any_state("class_short","class_short_params");
+                        state = "in_class";
+                    }else{
+                        add_c(c);
+                    }
                 },
+                "(":(c)=>{depth++;},
+                ")":(c)=>{depth--;},
                 [alpha_plus]:add_c,
                 "$":add_c,
             },
             "at_style_value":{
                 ";":function(c){ 
-                    write_text += ` ${FCSS.to_camel_case(vars_by_state["in_class"])}:${FCSS.type_to_value_string(vars_by_state["at_style_value"].trim())},`;
-                    clear_any_state("in_class","at_style_value");
-                    style_type = 0;
-                    state = "in_class";
+                    if(depth == 0){
+                        class_dict[FCSS.to_camel_case(vars_by_state["in_class"])] = FCSS.type_to_value(vars_by_state["at_style_value"].trim());
+                        clear_any_state("in_class","at_style_value");
+                        state = "in_class";
+                    }else{
+                        add_c(c);
+                    }
                 },
+                "(":(c)=>{depth++;},
+                ")":(c)=>{depth--;},
                 "$":add_c,
                 [alpha_plus]:add_c,
             }
@@ -481,9 +566,14 @@ class FCSS {
             }
         }
 
-        document.querySelector("head").appendChild(script);
-        script.innerHTML = write_text;
+    }
 
+    static short_to_class(name, pairs, args){
+        let dict = {};
+        for(let pair of pairs){
+            dict[FCSS.to_camel_case(pair[0])] = new FCSSArg(pair[1]);
+        }
+        new FCSS(name, dict, args);
     }
 
     static load_from_url(url){
@@ -530,7 +620,7 @@ Element.prototype.apply_fclass = function(name, params=null){
 
     el.fclass_list.add(name);
     el.classList.add(name);
-}
+};
 
 Element.prototype.remove_fclass = function(name){
     let el = this;
@@ -569,10 +659,132 @@ Element.prototype.remove_fclass = function(name){
         }
 
     }
+};
+
+
+Element.prototype.apply_fstyle = function(style_name, style_value){
+    let element = this;
+    if(style_value instanceof FCSSVariable){
+        element.style[style_name] = FCSS.global_variables[style_value.name];
+    }else if(style_value instanceof FCSSElement){
+        let selected_el = FCSS.GetSelected(element, style_value.selector);
+        let selector_style_name = FCSS.GetStyleNameFromSelector(style_name, style_value.selector);
+        element.style[style_name] = selected_el.style[selector_style_name];
+    }else{
+        element.style[style_name] = style_value;
+    }
 }
 
+Element.prototype.apply_fstyles = function(styles_string){
+    let element = this;
+    let fstyles = styles_string.split_except_depth(";");
+    for(let s of fstyles){
+        let split = s.split_left_right(":");
+        split.right = split.right.trim();
+        split.left = split.left.trim();
+        let style_name = FCSS.to_camel_case(split.left).trim();
 
-window.addEventListener("load", ()=>{
+        if(split.left[0] != "&"){
+
+            let style_value = FCSS.type_to_value(split.right, false);
+
+            element.apply_fstyle(style_name, style_value);
+
+        }else{
+            let short_params = split.right.split_except_depth(",");
+
+            let short_name = split.left.slice(1);
+
+            if(!(short_name in FCSS.shorthands)){
+                throw new Error(`Shorthand, ${short_name}, does not exist`);
+            }
+
+
+            let shorthand_style_dict = FCSS.shorthands[short_name].get_classed_style_dict({}, short_params, false);
+            for(let style_name in shorthand_style_dict){
+                let style_value = shorthand_style_dict[style_name];
+                element.apply_fstyle(style_name, style_value);
+            }
+
+        }
+
+
+    }
+}
+
+String.prototype.split_left_right = function(sub){
+
+    let s = this;
+    let left = "";
+    let right = "";
+
+    if(sub.length == 0){
+        return {left:"",right:s};
+    }
+
+    for(let i = 0; i < s.length; i++){
+        let curr_i = i;
+        let added = 0;
+        let sub_i = 0;
+        while(s[curr_i+added] == sub[sub_i]){
+            sub_i++;
+            added++;
+            if(sub_i >= sub.length){
+                return {left:s.slice(0, curr_i),right:s.slice(curr_i+added)};
+            }
+        }
+    }
+
+    return {left:s, right:""};
+
+};
+
+String.prototype.split_except_depth = function(sub){
+    let s = this;
+    let depth = 0;
+
+    if(sub.length == 0){
+        throw new Error("substring must not be empty");
+    }
+
+    let split_arr = [];
+    let last_i = -1;
+
+    for(let i = 0; i < s.length; i++){
+        let curr_i = i;
+        let added = 0;
+        let sub_i = 0;
+
+        if(s[i] == "("){
+            depth++;
+        }
+
+        if(s[i] == ")"){
+            depth--;
+        }
+
+        while(depth == 0 && curr_i+added < s.length && sub_i < sub.length && s[curr_i+added] == sub[sub_i]){
+            sub_i++;
+            added++;
+            if(sub_i >= sub.length){
+               added--;
+               split_arr.push(s.slice(last_i+1, curr_i));
+               last_i = curr_i+added;
+               i += added;
+            }
+        }
+
+    }
+
+    if(last_i < s.length-1){
+        split_arr.push(s.slice(last_i+1, s.length));
+    }
+
+    return split_arr;
+
+}
+
+function load_fcss_classes(){
     let applied_els = document.querySelectorAll("[fclass]");
     for(let el of applied_els){
         let classes = FCSS.get_classes(el.getAttribute("fclass"));
@@ -581,4 +793,16 @@ window.addEventListener("load", ()=>{
             el.apply_fclass(info.name, info.params);
         }
     }
+}
+
+function load_fcss_styles(){
+    let applied_els = document.querySelectorAll("[fstyle]");
+    for(let el of applied_els){
+        el.apply_fstyles(el.getAttribute("fstyle"));
+    }
+}
+
+window.addEventListener("load",()=>{
+    load_fcss_classes();
+    load_fcss_styles();
 });

@@ -2,3 +2,6 @@ styles.js
 test.html
 *.fcss
 compilefcss.py
+*.jpg
+*.jpeg
+*.png
