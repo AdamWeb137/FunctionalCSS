@@ -599,7 +599,11 @@ class FCSS {
 
 }
 
-Element.prototype.apply_fclass = function(name, params=null){
+Element.prototype.apply_fclass = function(fcss_class){
+
+    let info = FCSS.get_class_info(fcss_class);
+    let name = info.name;
+    let params = info.params;
 
     let el = this;
 
@@ -621,6 +625,14 @@ Element.prototype.apply_fclass = function(name, params=null){
     el.fclass_list.add(name);
     el.classList.add(name);
 };
+
+Element.prototype.apply_all_fclasses = function(){
+    let el = this;
+    let classes = FCSS.get_classes(el.getAttribute("fclass"));
+    for(let fcss_class of classes){
+        el.apply_fclass(fcss_class);
+    }
+}
 
 Element.prototype.remove_fclass = function(name){
     let el = this;
@@ -675,7 +687,8 @@ Element.prototype.apply_fstyle = function(style_name, style_value){
     }
 }
 
-Element.prototype.apply_fstyles = function(styles_string){
+Element.prototype.apply_fstyles = function(styles_string=null){
+    styles_string = styles_string ?? this.getAttribute("fstyle");
     let element = this;
     let fstyles = styles_string.split_except_depth(";");
     for(let s of fstyles){
@@ -787,18 +800,14 @@ String.prototype.split_except_depth = function(sub){
 function load_fcss_classes(){
     let applied_els = document.querySelectorAll("[fclass]");
     for(let el of applied_els){
-        let classes = FCSS.get_classes(el.getAttribute("fclass"));
-        for(let fcss_class of classes){
-            let info = FCSS.get_class_info(fcss_class);
-            el.apply_fclass(info.name, info.params);
-        }
+        el.apply_all_fclasses();
     }
 }
 
 function load_fcss_styles(){
     let applied_els = document.querySelectorAll("[fstyle]");
     for(let el of applied_els){
-        el.apply_fstyles(el.getAttribute("fstyle"));
+        el.apply_fstyles();
     }
 }
 
